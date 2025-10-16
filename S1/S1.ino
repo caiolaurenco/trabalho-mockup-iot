@@ -36,6 +36,10 @@ void setup() {
 
 
 void loop() {
-
+  String mensagem = "Caio: ";
+  mensagem += "oi";
+  mqtt.publish("Topico-DSM14", mensagem.c_str());
+  mqtt.loop();
+  delay(1000);
 
 }
