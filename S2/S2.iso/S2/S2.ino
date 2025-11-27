@@ -1,159 +1,154 @@
-#include <WiFi.h>                
-#include <WiFiClientSecure.h>    
-#include <PubSubClient.h>        
-#include "env.h"                 // Dados do WiFi e MQTT
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include "env.h"
 
-WiFiClientSecure client;
-PubSubClient mqtt(client);
+// --- OBJETOS ---
+WiFiClientSecure wifiSecure;
+PubSubClient mqttClient(wifiSecure);
 
-// --- Sensores ultrassônicos ---
-const byte TRIGGER_PIN = 19;
-const byte ECHO_PIN = 13;
+// --- Pinos dos sensores ---
+const byte PIN_TRIG_A = 19;
+const byte PIN_ECHO_A = 13;
 
-const byte TRIGGER_PIN2 = 27;
-const byte ECHO_PIN2 = 18;
+const byte PIN_TRIG_B = 27;
+const byte PIN_ECHO_B = 18;
 
 // --- LED ---
-const byte LED_PIN = 12;
+const byte PIN_LED_STATUS = 12;
 
-// Controle de mensagens
-unsigned long lastMsg = 0;
-bool objetoProximoAnterior = false;
+// --- Controle ---
+unsigned long ultimoEnvio = 0;
+bool detectouAnterior = false;
 
 // =====================================================================
-//  CONEXÃO COM O WI-FI
+//  LEITURA DO SENSOR ULTRASSÔNICO
 // =====================================================================
-void conectaWiFi() {
-  Serial.println("Conectando ao WiFi...");
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+long medirCM(byte trig, byte echo) {
+  digitalWrite(trig, LOW);
+  delayMicroseconds(3);
 
-  // Aguarda conectar
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(500);
-  }
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(12);
+  digitalWrite(trig, LOW);
 
-  Serial.println("\nWiFi conectado!");
-  Serial.println(WiFi.localIP());     // Mostra o IP recebido
+  long tempo = pulseIn(echo, HIGH, 20000);
+  if (tempo <= 0) return -1;
+
+  return tempo * 0.034 / 2;
 }
 
 // =====================================================================
-//  CONEXÃO COM O BROKER MQTT
+//  CALLBACK MQTT (responde quando chega mensagem)
 // =====================================================================
-void conectaMQTT() {
-  while (!mqtt.connected()) {
-    Serial.print("Conectando ao broker... ");
+void mqttCallback(char* topico, byte* mensagem, unsigned int tam) {
+  String conteudo = "";
+  for (int i = 0; i < tam; i++) conteudo += (char)mensagem[i];
 
-    // Cria ID único pro ESP32
-    String clientId = "ESP32-" + String(random(0xffff), HEX);
+  Serial.print("Recebido: ");
+  Serial.println(conteudo);
 
-    // Tenta conectar usando usuário e senha
-    if (mqtt.connect(clientId.c_str(), BROKER_USER, BROKER_PASS)) {
-      Serial.println("Conectado!");
-      mqtt.subscribe(TOPIC_ILUM);   // Recebe comandos do LED
+  if (conteudo == "Acender") {
+    digitalWrite(PIN_LED_STATUS, HIGH);
+  } 
+  else if (conteudo == "Apagar") {
+    digitalWrite(PIN_LED_STATUS, LOW);
+  }
+}
+
+// =====================================================================
+//  CONEXÃO MQTT
+// =====================================================================
+void iniciarMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("Conectando ao MQTT... ");
+    String id = "DISP-" + String(random(0xFFFF), HEX);
+
+    if (mqttClient.connect(id.c_str(), BROKER_USER, BROKER_PASS)) {
+      Serial.println("OK");
+      mqttClient.subscribe(TOPIC_ILUM);
     } else {
-      Serial.print("Falhou (rc=");
-      Serial.print(mqtt.state());
+      Serial.print("Falhou (");
+      Serial.print(mqttClient.state());
       Serial.println("). Tentando...");
-      delay(5000);
+      delay(3000);
     }
   }
 }
 
 // =====================================================================
-//  FUNÇÃO PARA LER DISTÂNCIA DOS SENSORES ULTRASSÔNICOS
+//  CONEXÃO WI-FI
 // =====================================================================
-long lerDistancia(byte triggerPin, byte echoPin) {
-  // Pulso de disparo
-  digitalWrite(triggerPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(triggerPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(triggerPin, LOW);
+void iniciarWiFi() {
+  Serial.println("Conectando WiFi...");
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-  // Mede retorno do som
-  long duracao = pulseIn(echoPin, HIGH, 20000);
-  if (duracao == 0) return -1;   // Erro de leitura
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print("#");
+    delay(400);
+  }
 
-  return duracao * 0.034 / 2;    // Converte em centímetros
+  Serial.println("\nConectado!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 // =====================================================================
-//  RECEBIMENTO DE MENSAGENS MQTT (CONTROLE DO LED)
-// =====================================================================
-void callback(char* topic, byte* payload, unsigned int length) {
-  String msg = "";
-
-  for (int i = 0; i < length; i++) msg += (char)payload[i];
-
-  Serial.print("Mensagem recebida: ");
-  Serial.println(msg);
-
-  // Comandos de LED
-  if (msg == "Acender") digitalWrite(LED_PIN, HIGH);
-  else if (msg == "Apagar") digitalWrite(LED_PIN, LOW);
-}
-
-// =====================================================================
-//  SETUP INICIAL
+//  SETUP
 // =====================================================================
 void setup() {
   Serial.begin(115200);
 
-  // Configura sensores e LED
-  pinMode(TRIGGER_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
+  // Pinos dos sensores
+  pinMode(PIN_TRIG_A, OUTPUT);
+  pinMode(PIN_ECHO_A, INPUT);
 
-  pinMode(TRIGGER_PIN2, OUTPUT);
-  pinMode(ECHO_PIN2, INPUT);
+  pinMode(PIN_TRIG_B, OUTPUT);
+  pinMode(PIN_ECHO_B, INPUT);
 
-  pinMode(LED_PIN, OUTPUT);
+  // LED
+  pinMode(PIN_LED_STATUS, OUTPUT);
 
-  client.setInsecure();     // Conexão MQTT sem certificado
-  conectaWiFi();            // Conecta WiFi
+  wifiSecure.setInsecure();    // Aceita MQTT sem certificado
+  iniciarWiFi();
 
-  mqtt.setServer(BROKER_URL, BROKER_PORT);
-  mqtt.setCallback(callback);
-  conectaMQTT();            // Conecta MQTT
+  mqttClient.setServer(BROKER_URL, BROKER_PORT);
+  mqttClient.setCallback(mqttCallback);
+  iniciarMQTT();
 }
 
 // =====================================================================
 //  LOOP PRINCIPAL
 // =====================================================================
 void loop() {
-  if (!mqtt.connected()) conectaMQTT();
-  mqtt.loop();   // Mantém comunicação MQTT ativa
 
-  // Executa a cada 2 segundos
-  if (millis() - lastMsg > 2000) {
-    lastMsg = millis();
+  if (!mqttClient.connected()) iniciarMQTT();
+  mqttClient.loop();
 
-    long distancia1 = lerDistancia(TRIGGER_PIN, ECHO_PIN);
-    long distancia2 = lerDistancia(TRIGGER_PIN2, ECHO_PIN2);
+  unsigned long atual = millis();
 
-    Serial.print("Sensor 1: ");
-    Serial.println(distancia1);
+  if (atual - ultimoEnvio >= 2000) {
+    ultimoEnvio = atual;
 
-    Serial.print("Sensor 2: ");
-    Serial.println(distancia2);
+    long distA = medirCM(PIN_TRIG_A, PIN_ECHO_A);
+    long distB = medirCM(PIN_TRIG_B, PIN_ECHO_B);
 
-    // --- Detecção de objeto próximo ---
-    if (distancia1 > 0 && distancia1 < 10) {
-      if (!objetoProximoAnterior) {
-        mqtt.publish(TOPIC_ILUM, "Objeto proximo no sensor 1");
-        objetoProximoAnterior = true;
-      }
-    }
+    Serial.print("A: "); Serial.println(distA);
+    Serial.print("B: "); Serial.println(distB);
 
-    else if (distancia2 > 0 && distancia2 < 10) {
-      if (!objetoProximoAnterior) {
-        mqtt.publish(TOPIC_ILUM, "Objeto proximo no sensor 2");
-        objetoProximoAnterior = true;
-      }
-    }
+    bool pertoA = (distA > 0 && distA < 10);
+    bool pertoB = (distB > 0 && distB < 10);
 
-    else {
-      objetoProximoAnterior = false;   // Reseta estado
+    if (pertoA && !detectouAnterior) {
+      mqttClient.publish(TOPIC_ILUM, "Objeto proximo no sensor A");
+      detectouAnterior = true;
+    } 
+    else if (pertoB && !detectouAnterior) {
+      mqttClient.publish(TOPIC_ILUM, "Objeto proximo no sensor B");
+      detectouAnterior = true;
+    } 
+    else if (!pertoA && !pertoB) {
+      detectouAnterior = false;
     }
   }
 }
