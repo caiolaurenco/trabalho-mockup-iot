@@ -1,16 +1,3 @@
-Conversa aberta. 1 mensagem não lida.
-
-Pular para o conteúdo
-Como usar o E-mail de SENAI-SC Serviço Nacional de Aprendizagem Industrial com leitores de tela
-
-1 de 2.421
-(sem assunto)
-Caixa de entrada
-
-Lucas Felipe Dias Ramos
-11:31 (há 47 minutos)
-para mim
-
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
@@ -69,8 +56,8 @@ long lerDistancia(byte triggerPin, byte echoPin) {
   delayMicroseconds(10);
   digitalWrite(triggerPin, LOW);
 
-  long duracao = pulseIn(echoPin, HIGH, 20000);
-  if (duracao == 0) return -1;
+  long duracao = pulseIn(echoPin, HIGH, 20000); 
+  if (duracao == 0) return -1; 
 
   return (long) duracao * 0.034 / 2;
 }
